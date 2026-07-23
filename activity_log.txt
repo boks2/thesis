@@ -1,0 +1,35 @@
+USER: student | PC: annejie | Time: 21:57:26
+USER: student | PC: annejie | Time: 21:58:26
+USER: boks | PC: annejie | Time: 22:05:00
+USER: boks | PC: annejie | Time: 22:05:03
+USER: boks | PC: annejie | Time: 22:05:04
+USER: boks | PC: annejie | Time: 22:05:04
+USER: boks | PC: annejie | Time: 22:05:05
+USER: boks | PC: annejie | Time: 22:05:05
+USER: boks | PC: annejie | Time: 22:05:06
+USER: boks | PC: annejie | Time: 22:05:20
+USER:  nbhbh | PC: annejie | Time: 22:59:15
+USER: asd | PC: annejie | Time: 22:59:52
+USER: boks | PC: annejie | Time: 23:14:55
+USER: student | PC: annejie | Time: 23:25:59
+USER: student | PC: annejie | Time: 23:26:19
+USER: student | PC: annejie | Time: 23:26:24
+USER: student | PC: annejie | Time: 23:26:59
+USER: student | PC: annejie | Time: 23:29:30
+USER: student | PC: annejie
+USER: student | PC: annejie
+USER: student | PC: annejie
+USER: student | PC: annejie
+USER: student | PC: annejie
+USER: student | PC: annejie
+USER: student | PC: annejie
+USER: student | PC: annejie
+USER: student | PC: annejie
+[00:54:10] LOGIN - User: student on annejie
+[00:54:13] LOGOUT - User: student on annejie (Duration: 0:00:03)
+[00:54:17] LOGIN - User: student on annejie
+[00:54:32] LOGOUT - User: student on annejie (Duration: 0:00:15)
+[00:54:49] LOGIN - User: student on annejie
+[00:54:55] LOGOUT - User: student on annejie (Duration: 0:00:06)
+[00:55:01] LOGIN - User: student on annejie
+[00:55:05] LOGOUT - User: student on annejie (Duration: 0:00:03)
