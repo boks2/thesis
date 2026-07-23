@@ -1,16 +1,76 @@
 import socket
 import threading
 import io
+import json
+import os
 from datetime import datetime
 from PIL import Image, ImageTk
 
+LOG_PORT = 5001
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Direktang i-target ang root kung saan katabi ng login.py ang pending_accounts.json
+REG_FILE = os.path.abspath(os.path.join(BASE_DIR, "..", "pending_accounts.json"))
+
+def start_log_listener():
+    """Tatakbo sa sariling thread para mag-abang ng registrations sa Port 5001"""
+    log_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    log_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    try:
+        log_server.bind(("0.0.0.0", LOG_PORT))
+        log_server.listen(10)
+        print(f"\n==========================================")
+        print(f"[DEBUG] Log listener ay BUKAS at ACTIVE sa port {LOG_PORT}")
+        print(f"==========================================\n")
+    except Exception as e:
+        print(f"[ERROR] Hindi ma-bind ang Port {LOG_PORT}: {e}")
+        return
+
+    while True:
+        try:
+            conn, addr = log_server.accept()
+            command = conn.recv(1024).decode().strip()
+            print(f"[DEBUG] May pumasok mula sa {addr[0]}: '{command}'")
+            
+            if "ACTION: REGISTER" in command:
+                # Kunin ang username at password kahit may mga extra space
+                parts = command.split("|")
+                username = ""
+                password = ""
+                
+                for part in parts:
+                    if "USER:" in part:
+                        username = part.split("USER:")[1].strip()
+                    elif "PWD:" in part:
+                        password = part.split("PWD:")[1].strip()
+                
+                if username and password:
+                    data = []
+                    if os.path.exists(REG_FILE):
+                        with open(REG_FILE, "r") as f:
+                            try: data = json.load(f)
+                            except: data = []
+                            
+                    if not any(acc["username"] == username for acc in data):
+                        data.append({"username": username, "password": password, "status": "Pending"})
+                        with open(REG_FILE, "w") as f:
+                            json.dump(data, f, indent=4)
+                        print(f"[SUCCESS] Na-save si {username} sa pending_accounts.json!")
+            
+            conn.close()
+        except Exception as e:
+            print(f"[ERROR sa Log Listener]: {e}")
+
 def start_global_listener(self):
+    # 1. Simulan agad ang Log Listener sa Port 5001
+    threading.Thread(target=start_log_listener, daemon=True).start()
+
+    # 2. Listener para sa Screen Streaming (Port 9998)
     def handle_client(conn, addr):
         student_ip = addr[0]
         self.connected_students[student_ip] = conn
-        print(f"Connection from {student_ip} stored.")
-       
-        display_name = "Alice - PC 01" if student_ip == "192.168.100.251" else f"User - {student_ip}"
+        display_name = f"User - {student_ip}"
         self.after(0, lambda: record_login(self, display_name, student_ip))
        
         try:
@@ -29,7 +89,6 @@ def start_global_listener(self):
                     image = Image.open(io.BytesIO(frame_data))
                     image = image.resize((240, 150), Image.Resampling.LANCZOS)
                     img_tk = ImageTk.PhotoImage(image)
-                   
                     self.after(0, lambda ip=student_ip, img=img_tk: update_thumbnail_frame(self, ip, img))
         except Exception as e:
             print(f"Stream error with {student_ip}: {e}")
@@ -39,7 +98,7 @@ def start_global_listener(self):
                 del self.connected_students[student_ip]
             self.after(0, lambda: record_logout(self, student_ip))
 
-    def listener():
+    def stream_listener():
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("0.0.0.0", 9998))
@@ -48,7 +107,7 @@ def start_global_listener(self):
             conn, addr = server.accept()
             threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
            
-    threading.Thread(target=listener, daemon=True).start()
+    threading.Thread(target=stream_listener, daemon=True).start()
 
 def update_thumbnail_frame(self, ip, img_tk):
     if ip in self.student_cards:

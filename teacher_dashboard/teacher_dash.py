@@ -6,7 +6,8 @@ from .screen_receiver import ScreenViewer
 # Import hiwalay na modules mula sa kaparehong folder
 from .history_window import open_history_window
 from .student_cards import setup_grid_layout, create_student_card
-from .network_listeners import start_global_listener, update_thumbnail_frame, record_login, record_logout
+from .network_listeners import start_global_listener as run_global_listener, update_thumbnail_frame, record_login, record_logout
+from .account_approvals import open_account_approvals
 
 class TeacherDashboard(ctk.CTkToplevel):
     def __init__(self, master_app):
@@ -15,14 +16,14 @@ class TeacherDashboard(ctk.CTkToplevel):
         self.connected_students = {}
         self.student_cards = {}
         self.login_history_data = []
-       
+        
         self.title("Teacher Dashboard")
         self.geometry("1200x800")
-       
+        
         # --- TOP TOOLBAR ---
         self.top_toolbar = ctk.CTkFrame(self, height=65, fg_color="#333333", corner_radius=0)
         self.top_toolbar.pack(side="top", fill="x")
-       
+        
         toolbar_items = [
             ("Monitoring", None),
             ("Fullscreen demo", None),
@@ -38,9 +39,10 @@ class TeacherDashboard(ctk.CTkToplevel):
             ("Run program", None),
             ("Open website", self.open_website_dialog),
             ("Screenshot", None),
-            ("History", lambda: open_history_window(self, self.login_history_data))
+            ("History", lambda: open_history_window(self, self.login_history_data)),
+            ("Approvals", lambda: open_account_approvals(self)),
         ]
-       
+        
         for btn_text, btn_command in toolbar_items:
             btn = ctk.CTkButton(
                 self.top_toolbar,
@@ -58,18 +60,20 @@ class TeacherDashboard(ctk.CTkToplevel):
 
         # --- MAIN GRID PARA SA MGA PC NG ESTUDYANTE ---
         setup_grid_layout(self)
-        start_global_listener(self)
+        
+        # Direktang pinapagana ang listener para sa Port 5001 at 9998
+        run_global_listener(self)
 
         # --- BOTTOM STATUS BAR ---
         self.bottom_bar = ctk.CTkFrame(self, height=40, fg_color="#2b2b2b", corner_radius=0)
         self.bottom_bar.pack(side="bottom", fill="x")
-       
+        
         self.lbl_rooms = ctk.CTkButton(self.bottom_bar, text="Computer rooms", fg_color="transparent", text_color="white", width=100)
         self.lbl_rooms.pack(side="left", padx=10)
-       
+        
         self.lbl_screenshots = ctk.CTkButton(self.bottom_bar, text="Screenshots", fg_color="transparent", text_color="white", width=90)
         self.lbl_screenshots.pack(side="left", padx=5)
-       
+        
         self.search_entry = ctk.CTkEntry(self.bottom_bar, placeholder_text="Search users and computers", width=220)
         self.search_entry.pack(side="left", padx=15, pady=5)
 
@@ -84,8 +88,7 @@ class TeacherDashboard(ctk.CTkToplevel):
 
     def show_context_menu(self, event, ip, name):
         context_menu = tk.Menu(self, tearoff=0, bg="#f0f0f0", fg="black", font=("Arial", 10))
-       
-        # Remote View (Monitoring lang - is_control=False)
+        
         context_menu.add_command(label="Remote View", command=lambda: self.open_full_view(ip, is_control=False))
         context_menu.add_command(label="Fullscreen demo", command=lambda: print(f"Fullscreen demo for {ip}"))
         context_menu.add_separator()
@@ -93,21 +96,17 @@ class TeacherDashboard(ctk.CTkToplevel):
         context_menu.add_command(label="Unlock", command=lambda: send_command(ip, "UNLOCK"))
         context_menu.add_separator()
         
-        # Message para sa specific student
         context_menu.add_command(label="Message", command=lambda: self.open_single_text_message_dialog(ip))
         context_menu.add_separator()
 
-        # Open website para sa specific student
         context_menu.add_command(label="Open website", command=lambda: self.open_single_website_dialog(ip))
         context_menu.add_separator()
 
-        # Power controls para sa specific student
         context_menu.add_command(label="Reboot", command=lambda: send_command(ip, "REBOOT"))
         context_menu.add_command(label="Sleep", command=lambda: send_command(ip, "SLEEP"))
         context_menu.add_command(label="Power down", command=lambda: send_command(ip, "SHUTDOWN"))
         context_menu.add_separator()
         
-        # Remote Control (May hawak ng mouse - is_control=True)
         context_menu.add_command(label="Remote Control", command=lambda: self.open_full_view(ip, is_control=True))
         
         try:
@@ -204,7 +203,7 @@ class TeacherDashboard(ctk.CTkToplevel):
         record_logout(self, ip)
 
     def start_global_listener(self):
-        start_global_listener(self)
+        run_global_listener(self)
 
     def lock_all_students(self):
         send_command("192.168.100.251", "LOCK")

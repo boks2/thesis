@@ -14,5 +14,21 @@
     "admin": {
         "password": "admin123",
         "role": "Admin"
+    },
+    "awa": {
+        "password": "awa",
+        "role": "Student"
+    },
+    "zxc": {
+        "password": "zxc",
+        "role": "Student"
+    },
+    "13": {
+        "password": "13",
+        "role": "Student"
+    },
+    "fg": {
+        "password": "fg",
+        "role": "Student"
     }
 }

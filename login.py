@@ -44,9 +44,79 @@ class LoginApp(ctk.CTk):
             try:
                 conn, addr = server.accept()
                 data = conn.recv(1024).decode()
-                self.process_log(data)
-                conn.close()
-            except: break
+                
+                # Sinusuri kung ito ba ay login verification, registration, o regular log
+                if "ACTION: LOGIN_CHECK" in data:
+                    self.handle_login_check(conn, data)
+                elif "ACTION: REGISTER" in data:
+                    self.process_register(data)
+                    conn.close()
+                else:
+                    self.process_log(data)
+                    conn.close()
+            except: 
+                break
+
+    def handle_login_check(self, conn, data):
+        try:
+            parts = data.split("|")
+            username = ""
+            password = ""
+            for part in parts:
+                if "USER:" in part:
+                    username = part.split("USER:")[1].strip()
+                elif "PWD:" in part:
+                    password = part.split("PWD:")[1].strip()
+            
+            # Basahin ang users.json sa Teacher side para i-verify ang lahat ng rehistrado/na-approve
+            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+            user_file_path = os.path.join(BASE_DIR, "users.json")
+            
+            users_data = {}
+            if os.path.exists(user_file_path):
+                with open(user_file_path, "r") as f:
+                    try: users_data = json.load(f)
+                    except: users_data = {}
+            
+            # Suriin kung totoo ang credentials sa users.json
+            if username in users_data and users_data[username]["password"] == password:
+                conn.send("SUCCESS".encode())
+            else:
+                conn.send("FAILED".encode())
+        except Exception as e:
+            print(f"[ERROR sa login check]: {e}")
+            conn.send("FAILED".encode())
+        finally:
+            conn.close()
+
+    def process_register(self, data):
+        try:
+            parts = data.split("|")
+            username = ""
+            password = ""
+            for part in parts:
+                if "USER:" in part:
+                    username = part.split("USER:")[1].strip()
+                elif "PWD:" in part:
+                    password = part.split("PWD:")[1].strip()
+            
+            if username and password:
+                BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+                reg_file = os.path.join(BASE_DIR, "pending_accounts.json")
+                
+                account_data = []
+                if os.path.exists(reg_file):
+                    with open(reg_file, "r") as f:
+                        try: account_data = json.load(f)
+                        except: account_data = []
+                
+                if not any(acc["username"] == username for acc in account_data):
+                    account_data.append({"username": username, "password": password, "status": "Pending"})
+                    with open(reg_file, "w") as f:
+                        json.dump(account_data, f, indent=4)
+                    print(f"[SUCCESS] Na-save si {username} sa pending_accounts.json!")
+        except Exception as e:
+            print(f"[ERROR sa pag-save ng registration]: {e}")
 
     def process_log(self, data):
         try:

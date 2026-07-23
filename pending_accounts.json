@@ -1,0 +1,32 @@
+[
+    {
+        "username": "ASD",
+        "password": "ASD",
+        "status": "Accepted"
+    },
+    {
+        "username": "s",
+        "password": "s",
+        "status": "Declined"
+    },
+    {
+        "username": "awa",
+        "password": "awa",
+        "status": "Accepted"
+    },
+    {
+        "username": "zxc",
+        "password": "zxc",
+        "status": "Accepted"
+    },
+    {
+        "username": "13",
+        "password": "13",
+        "status": "Accepted"
+    },
+    {
+        "username": "fg",
+        "password": "fg",
+        "status": "Accepted"
+    }
+]
