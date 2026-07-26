@@ -46,5 +46,13 @@
     "new": {
         "password": "new",
         "role": "Student"
+    },
+    "boks": {
+        "password": "boks",
+        "role": "Student"
+    },
+    "tan": {
+        "password": "tan",
+        "role": "Student"
     }
 }

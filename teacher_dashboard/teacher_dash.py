@@ -16,6 +16,7 @@ class TeacherDashboard(ctk.CTkToplevel):
         self.connected_students = {}
         self.student_cards = {}
         self.login_history_data = []
+        self.active_viewers = {}  # [IDINAGDAG]: Dito itatala ang mga bukas na Remote View/Control windows
         
         self.title("Teacher Dashboard")
         self.geometry("1200x800")
@@ -41,9 +42,14 @@ class TeacherDashboard(ctk.CTkToplevel):
             ("Screenshot", None),
             ("History", lambda: open_history_window(self, self.login_history_data)),
             ("Approvals", lambda: open_account_approvals(self)),
+            ("Refresh", self.refresh_connections), # [BAGONG DAGDAG]: Refresh button para i-update ang listahan at mga username
         ]
         
         for btn_text, btn_command in toolbar_items:
+            # Baguhin ang kulay ng Refresh button para mas madali itong mapansin (kulay blue/indigo)
+            fg_col = "#1f6aa5" if btn_text == "Refresh" else "#383838"
+            hover_col = "#144870" if btn_text == "Refresh" else "#505050"
+            
             btn = ctk.CTkButton(
                 self.top_toolbar,
                 text=btn_text,
@@ -51,8 +57,8 @@ class TeacherDashboard(ctk.CTkToplevel):
                 compound="top",
                 width=75,
                 height=50,
-                fg_color="#383838",
-                hover_color="#505050",
+                fg_color=fg_col,
+                hover_color=hover_col,
                 font=ctk.CTkFont(size=10),
                 command=btn_command if btn_command else lambda t=btn_text: print(f"{t} clicked")
             )
@@ -76,6 +82,26 @@ class TeacherDashboard(ctk.CTkToplevel):
         
         self.search_entry = ctk.CTkEntry(self.bottom_bar, placeholder_text="Search users and computers", width=220)
         self.search_entry.pack(side="left", padx=15, pady=5)
+
+    def refresh_connections(self):
+        """[FIXED]: Linisin lamang ang mga active student cards nang hindi pinapatong ang grid container o sinisira ang socket listener."""
+        print("[DEBUG] Nirerefresh ang student cards sa dashboard...")
+        
+        # 1. Burahin ang mga visual widgets ng bawat student card sa UI
+        for ip, card_info in list(self.student_cards.items()):
+            try:
+                if isinstance(card_info, dict) and "frame" in card_info:
+                    card_info["frame"].destroy()
+                elif hasattr(card_info, "destroy"):
+                    card_info.destroy()
+            except Exception as e:
+                print(f"Error sa pagbura ng card para sa {ip}: {e}")
+                
+        # 2. I-clear ang dictionaries
+        self.student_cards.clear()
+        self.connected_students.clear()
+        
+        print("[DEBUG] Refresh tapos na. Nag-aabangan na muli ng mga pumapasok na streams.")
 
     def setup_grid_layout(self):
         setup_grid_layout(self)
@@ -192,7 +218,22 @@ class TeacherDashboard(ctk.CTkToplevel):
 
     def open_full_view(self, student_ip, is_control=False):
         try:
-            ScreenViewer(student_ip, control_mode=is_control)
+            if student_ip in self.active_viewers:
+                try:
+                    self.active_viewers[student_ip].destroy()
+                except:
+                    pass
+            
+            viewer = ScreenViewer(student_ip, control_mode=is_control)
+            self.active_viewers[student_ip] = viewer
+            
+            # Alisin sa diksyunaryo kapag isinara ang window
+            def on_viewer_close():
+                if student_ip in self.active_viewers:
+                    del self.active_viewers[student_ip]
+                viewer.destroy()
+                
+            viewer.protocol("WM_DELETE_WINDOW", on_viewer_close)
         except Exception as e:
             print(f"Error sa pagbubukas ng ScreenViewer: {e}")
 

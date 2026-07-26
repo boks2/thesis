@@ -9,7 +9,6 @@ from PIL import Image, ImageTk
 LOG_PORT = 5001
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Direktang i-target ang root kung saan katabi ng login.py ang pending_accounts.json
 REG_FILE = os.path.abspath(os.path.join(BASE_DIR, "..", "pending_accounts.json"))
 
 def start_log_listener(self):
@@ -57,7 +56,6 @@ def start_log_listener(self):
                             json.dump(data, f, indent=4)
                         print(f"[SUCCESS] Na-save si {username} sa pending_accounts.json!")
 
-            # Sinasalo na nito pareho ang LOGIN at LOGIN_CHECK galing sa student app
             elif "ACTION: LOGIN" in command or "ACTION: LOGIN_CHECK" in command:
                 parts = command.split("|")
                 username = ""
@@ -65,7 +63,6 @@ def start_log_listener(self):
                     if "USER:" in part:
                         username = part.split("USER:")[1].strip()
                 
-                # Kung LOGIN_CHECK ang dumating, mag-reply muna ng "SUCCESS" pabalik sa student para tuloy-tuloy ang pag-login nila
                 if "ACTION: LOGIN_CHECK" in command:
                     try:
                         conn.sendall(b"SUCCESS")
@@ -83,53 +80,49 @@ def update_student_card_name(self, username, ip):
     pc_label = f"PC {ip.split('.')[-1]}"
     display_name = f"{username} - {pc_label}"
     
-    # I-update o i-store ang pangalan sa dictionary agad
-    if ip not in self.student_cards:
+    if ip not in self.student_cards or "frame" not in self.student_cards[ip] or not self.student_cards[ip]["frame"].winfo_exists():
         from .student_cards import create_student_card
         index = len(self.student_cards)
-        # Direktang gawin ang card gamit ang tamang username at IP
         create_student_card(self, display_name, ip, index)
     else:
-        # Kung nag-e-exist na, i-update ang text ng label nito
         card_info = self.student_cards[ip]
         card_info["name"] = display_name
-        if "info_label" in card_info:
+        if "info_label" in card_info and card_info["info_label"].winfo_exists():
             card_info["info_label"].configure(text=f"{display_name} ({ip})")
             
-        if "preview" in card_info:
+        if "preview" in card_info and card_info["preview"].winfo_exists():
             card_info["preview"].configure(text=f"{display_name}\n(Waiting for Live Stream...)")
 
 def start_global_listener(self):
     # 1. Simulan agad ang Log Listener sa Port 5001
     threading.Thread(target=start_log_listener, args=(self,), daemon=True).start()
 
-    # 2. Listener para sa Screen Streaming (Port 9998)
+    # 2. Listener para sa Grid Screen Streaming (Port 9998)
     def handle_client(conn, addr):
         student_ip = addr[0]
         self.connected_students[student_ip] = conn
         
         display_name = f"User - {student_ip}"
         
-        # Subukang basahin ang pangalan nang may maikling timeout para hindi ma-block ang stream
         try:
-            conn.settimeout(1.5)
-            raw_user_info = conn.recv(64).decode('utf-8', errors='ignore').strip()
+            conn.settimeout(3.0)
+            raw_user_info = conn.recv(128).decode('utf-8', errors='ignore').strip()
             conn.settimeout(None)
             
-            if raw_user_info.startswith("NAME:"):
-                actual_username = raw_user_info.split("NAME:")[1].strip()
-                display_name = f"{actual_username} - PC {student_ip.split('.')[-1]}"
+            print(f"[DEBUG STREAM] Natanggap mula sa {student_ip}: '{raw_user_info}'")
             
-            # Kung mayroon na sa student_cards mula sa login (Port 5001), gamitin iyon
-            if student_ip in self.student_cards and "name" in self.student_cards[student_ip]:
-                display_name = self.student_cards[student_ip]["name"]
-        except Exception:
+            if "NAME:" in raw_user_info:
+                parts = raw_user_info.split("NAME:")
+                if len(parts) > 1:
+                    actual_username = parts[1].split("\n")[0].strip()
+                    if actual_username:
+                        display_name = f"{actual_username} - PC {student_ip.split('.')[-1]}"
+        except Exception as e:
             conn.settimeout(None)
-            if student_ip in self.student_cards:
-                display_name = self.student_cards[student_ip].get("name", f"User - {student_ip}")
+            print(f"[DEBUG STREAM] Timeout sa pangalan para sa {student_ip}: {e}")
 
-        # Siguraduhing gagawa o iu-update ang card sa UI
-        self.after(0, lambda: update_student_card_name(self, display_name.split(" - ")[0], student_ip))
+        clean_username = display_name.split(" - ")[0]
+        self.after(0, lambda u=clean_username, ip=student_ip: update_student_card_name(self, u, ip))
         self.after(0, lambda: record_login(self, display_name, student_ip))
        
         try:
@@ -155,7 +148,26 @@ def start_global_listener(self):
             conn.close()
             if student_ip in self.connected_students:
                 del self.connected_students[student_ip]
-            self.after(0, lambda: record_logout(self, student_ip))
+            
+            def remove_card_ui():
+                if student_ip in self.student_cards:
+                    try:
+                        card_info = self.student_cards[student_ip]
+                        if isinstance(card_info, dict):
+                            if "card" in card_info and card_info["card"].winfo_exists():
+                                card_info["card"].destroy()
+                            elif "frame" in card_info and card_info["frame"].winfo_exists():
+                                card_info["frame"].destroy()
+                        elif hasattr(card_info, "destroy"):
+                            card_info.destroy()
+                    except Exception as e:
+                        print(f"Error sa pagbura ng card para sa {student_ip}: {e}")
+                    del self.student_cards[student_ip]
+
+            if hasattr(self, 'after'):
+                self.after(0, remove_card_ui)
+                self.after(0, lambda: record_logout(self, student_ip))
+
     def stream_listener():
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -166,6 +178,46 @@ def start_global_listener(self):
             threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
            
     threading.Thread(target=stream_listener, daemon=True).start()
+
+    # 3. [IDINAGDAG] Listener para sa Remote View / Remote Control (Port 9997)
+    def handle_remote_client(conn, addr):
+        student_ip = addr[0]
+        try:
+            while True:
+                raw_length = conn.recv(4)
+                if not raw_length: break
+                frame_length = int.from_bytes(raw_length, byteorder='big')
+                
+                frame_data = b""
+                while len(frame_data) < frame_length:
+                    packet = conn.recv(frame_length - len(frame_data))
+                    if not packet: break
+                    frame_data += packet
+                    
+                if len(frame_data) == frame_length:
+                    image = Image.open(io.BytesIO(frame_data))
+                    img_tk = ImageTk.PhotoImage(image)
+                    
+                    # Ipasa ang frame sa aktibong remote viewer window kung bukas ito
+                    if hasattr(self, 'active_viewers') and student_ip in self.active_viewers:
+                        viewer = self.active_viewers[student_ip]
+                        if viewer.winfo_exists():
+                            viewer.after(0, lambda img=img_tk, v=viewer: v.update_image(img))
+        except Exception as e:
+            print(f"Remote view error for {student_ip}: {e}")
+        finally:
+            conn.close()
+
+    def remote_listener():
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("0.0.0.0", 9997))
+        server.listen(10)
+        while True:
+            conn, addr = server.accept()
+            threading.Thread(target=handle_remote_client, args=(conn, addr), daemon=True).start()
+
+    threading.Thread(target=remote_listener, daemon=True).start()
 
 
 def update_thumbnail_frame(self, ip, img_tk):

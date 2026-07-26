@@ -58,5 +58,15 @@
         "username": "new",
         "password": "new",
         "status": "Accepted"
+    },
+    {
+        "username": "boks",
+        "password": "boks",
+        "status": "Accepted"
+    },
+    {
+        "username": "tan",
+        "password": "tan",
+        "status": "Accepted"
     }
 ]
