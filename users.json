@@ -1,12 +1,4 @@
 {
-    "student1": {
-        "password": "nmn",
-        "role": "Student"
-    },
-    "student2": {
-        "password": "asa",
-        "role": "Student"
-    },
     "teacher": {
         "password": "teacher123",
         "role": "Teacher"
@@ -29,6 +21,30 @@
     },
     "fg": {
         "password": "fg",
+        "role": "Student"
+    },
+    "11": {
+        "password": "11",
+        "role": "Student"
+    },
+    "gh": {
+        "password": "gh",
+        "role": "Student"
+    },
+    "nmn": {
+        "password": "nmn",
+        "role": "Student"
+    },
+    "asd123": {
+        "password": "asd123",
+        "role": "Student"
+    },
+    "wawawa": {
+        "password": "wawa",
+        "role": "Student"
+    },
+    "new": {
+        "password": "new",
         "role": "Student"
     }
 }

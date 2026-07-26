@@ -5,7 +5,8 @@ def setup_grid_layout(self):
     self.grid_frame.pack(fill="both", expand=True, padx=20, pady=10)
     self.grid_frame.grid_columnconfigure((0, 1, 2), weight=1)
    
-    create_student_card(self, "Alice - PC 01", "192.168.100.251", 0)
+    # Tinanggal na natin ang hardcoded na "Waiting for Student..." 
+    # para magsimula nang malinis ang grid at lumitaw lamang ang card kapag may nag-login o nag-stream.
 
 def create_student_card(self, name, ip, index):
     if ip in self.student_cards:
@@ -34,5 +35,6 @@ def create_student_card(self, name, ip, index):
     self.student_cards[ip] = {
         "card": pc_card,
         "preview": lbl_preview,
+        "info_label": lbl_info_text,
         "name": name
     }
