@@ -32,9 +32,9 @@ class TeacherDashboard(ctk.CTkToplevel):
             ("Lock", self.lock_all_students),
             ("Unlock", self.unlock_all_students),
             ("Power on", None),
-            ("Reboot", lambda: send_command("192.168.100.251", "REBOOT")),
-            ("Power down", lambda: send_command("192.168.100.251", "SHUTDOWN")),
-            ("Sleep", lambda: send_command("192.168.100.251", "SLEEP")),
+            ("Reboot", self.reboot_all_students),
+            ("Power down", self.shutdown_all_students),
+            ("Sleep", self.sleep_all_students),
             ("Logout user", None),
             ("Text message", self.open_text_message_dialog),
             ("Run program", None),
@@ -146,7 +146,7 @@ class TeacherDashboard(ctk.CTkToplevel):
         dialog.geometry("400x250")
         dialog.attributes("-topmost", True)
         
-        ctk.CTkLabel(dialog, text="I-type ang mensahe para sa mga estudyante:", font=("Arial", 12, "bold")).pack(pady=15)
+        ctk.CTkLabel(dialog, text="I-type ang mensahe para sa lahat ng estudyante:", font=("Arial", 12, "bold")).pack(pady=15)
         
         msg_entry = ctk.CTkTextbox(dialog, width=350, height=100)
         msg_entry.pack(pady=5)
@@ -154,7 +154,9 @@ class TeacherDashboard(ctk.CTkToplevel):
         def send_msg():
             message = msg_entry.get("1.0", "end-1c").strip()
             if message:
-                send_command("192.168.100.251", f"MSG:{message}")
+                # Dynamic broadcast sa lahat ng aktibong IP ng estudyante
+                for ip in self.student_cards.keys():
+                    send_command(ip, f"MSG:{message}")
                 dialog.destroy()
                 
         ctk.CTkButton(dialog, text="Broadcast Message", fg_color="green", command=send_msg).pack(pady=15)
@@ -192,7 +194,9 @@ class TeacherDashboard(ctk.CTkToplevel):
         def send_url():
             url = url_entry.get().strip()
             if url:
-                send_command("192.168.100.251", f"URL:{url}")
+                # Dynamic broadcast sa lahat ng aktibong IP ng estudyante
+                for ip in self.student_cards.keys():
+                    send_command(ip, f"URL:{url}")
                 dialog.destroy()
                 
         ctk.CTkButton(dialog, text="Open Website", fg_color="green", command=send_url).pack(pady=15)
@@ -227,7 +231,6 @@ class TeacherDashboard(ctk.CTkToplevel):
             viewer = ScreenViewer(student_ip, control_mode=is_control)
             self.active_viewers[student_ip] = viewer
             
-            # Alisin sa diksyunaryo kapag isinara ang window
             def on_viewer_close():
                 if student_ip in self.active_viewers:
                     del self.active_viewers[student_ip]
@@ -247,7 +250,26 @@ class TeacherDashboard(ctk.CTkToplevel):
         run_global_listener(self)
 
     def lock_all_students(self):
-        send_command("192.168.100.251", "LOCK")
+        """Dynamic broadcast ng LOCK sa lahat ng nakakonektang estudyante."""
+        for ip in self.student_cards.keys():
+            send_command(ip, "LOCK")
 
     def unlock_all_students(self):
-        send_command("192.168.100.251", "UNLOCK")
+        """Dynamic broadcast ng UNLOCK sa lahat ng nakakonektang estudyante."""
+        for ip in self.student_cards.keys():
+            send_command(ip, "UNLOCK")
+
+    def reboot_all_students(self):
+        """Dynamic broadcast ng REBOOT sa lahat ng nakakonektang estudyante."""
+        for ip in self.student_cards.keys():
+            send_command(ip, "REBOOT")
+
+    def shutdown_all_students(self):
+        """Dynamic broadcast ng SHUTDOWN sa lahat ng nakakonektang estudyante."""
+        for ip in self.student_cards.keys():
+            send_command(ip, "SHUTDOWN")
+
+    def sleep_all_students(self):
+        """Dynamic broadcast ng SLEEP sa lahat ng nakakonektang estudyante."""
+        for ip in self.student_cards.keys():
+            send_command(ip, "SLEEP")
