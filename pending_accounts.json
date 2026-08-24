@@ -47,7 +47,7 @@
     {
         "username": "watata",
         "password": "wawa",
-        "status": "Pending"
+        "status": "Declined"
     },
     {
         "username": "wawawa",
@@ -67,6 +67,16 @@
     {
         "username": "tan",
         "password": "tan",
+        "status": "Accepted"
+    },
+    {
+        "username": "ANGE",
+        "password": "ANGE",
+        "status": "Accepted"
+    },
+    {
+        "username": "TAN",
+        "password": "TAN",
         "status": "Accepted"
     }
 ]

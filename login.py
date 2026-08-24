@@ -4,8 +4,14 @@ import os
 import socket
 import threading
 import datetime
+import struct
+import time
+import cv2
+import numpy as np
+import pyautogui
 from config import apply_theme
 from teacher_dashboard.teacher_dash import TeacherDashboard
+from teacher_dashboard.network_listeners import handle_student_expression  # <--- Na-import na rito
 from admin_dashboard.admin_dash import AdminDashboard
 
 apply_theme()
@@ -13,8 +19,8 @@ apply_theme()
 class LoginApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("ScholarNet Login")
-        self.geometry("350x400")
+        self.title("ScholarNet Login - Teacher/Admin")
+        self.geometry("350x450")
         
         self.USERS = {
             "student": {"password": "student123", "role": "Student"},
@@ -23,9 +29,15 @@ class LoginApp(ctk.CTk):
         }
         
         self.all_logs = [] 
-        threading.Thread(target=self.start_log_listener, daemon=True).start()
+        self.active_broadcast = False
+        self.broadcast_socket = None
+        self.active_teacher_dashboard = None  # <--- Reference para sa student expressions
         
-        ctk.CTkLabel(self, text="ScholarNet Login", font=("Arial", 20)).pack(pady=20)
+        # Simulan ang background log listener at broadcast server
+        threading.Thread(target=self.start_log_listener, daemon=True).start()
+        threading.Thread(target=self.broadcast_stream_server, daemon=True).start()
+        
+        ctk.CTkLabel(self, text="ScholarNet Login", font=("Arial", 20, "bold")).pack(pady=20)
         self.user_entry = ctk.CTkEntry(self, placeholder_text="Username")
         self.user_entry.pack(pady=10)
         self.pass_entry = ctk.CTkEntry(self, placeholder_text="Password", show="*")
@@ -40,16 +52,27 @@ class LoginApp(ctk.CTk):
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("0.0.0.0", 5001))
         server.listen(5)
+        print("==========================================")
+        print("[DEBUG] Log & Command listener ay BUKAS sa port 5001")
+        print("==========================================")
         while True:
             try:
                 conn, addr = server.accept()
                 data = conn.recv(1024).decode()
                 
-                # Sinusuri kung ito ba ay login verification, registration, o regular log
                 if "ACTION: LOGIN_CHECK" in data:
                     self.handle_login_check(conn, data)
                 elif "ACTION: REGISTER" in data:
                     self.process_register(data)
+                    conn.close()
+                elif "EXPRESSION:" in data:
+                    # Masalo ang expression galing sa student at ipasa sa teacher dashboard
+                    expr_content = data.replace("EXPRESSION:", "").strip()
+                    print(f"[STUDENT EXPRESSION] mula {addr[0]}: {expr_content}")
+                    if self.active_teacher_dashboard:
+                        self.active_teacher_dashboard.after(
+                            0, lambda e=expr_content, ip=addr[0]: handle_student_expression(self.active_teacher_dashboard, e, ip)
+                        )
                     conn.close()
                 else:
                     self.process_log(data)
@@ -68,7 +91,6 @@ class LoginApp(ctk.CTk):
                 elif "PWD:" in part:
                     password = part.split("PWD:")[1].strip()
             
-            # Basahin ang users.json sa Teacher side para i-verify ang lahat ng rehistrado/na-approve
             BASE_DIR = os.path.dirname(os.path.abspath(__file__))
             user_file_path = os.path.join(BASE_DIR, "users.json")
             
@@ -78,7 +100,6 @@ class LoginApp(ctk.CTk):
                     try: users_data = json.load(f)
                     except: users_data = {}
             
-            # Suriin kung totoo ang credentials sa users.json
             if username in users_data and users_data[username]["password"] == password:
                 conn.send("SUCCESS".encode())
             else:
@@ -133,17 +154,71 @@ class LoginApp(ctk.CTk):
                         break
         except: pass
 
+    # --- FULL SCREEN DEMO BROADCAST SERVER (Naka-optimize para sa Wi-Fi / Real-Time) ---
+    def broadcast_stream_server(self):
+        PORT = 9996
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            server.bind(("0.0.0.0", PORT))
+            server.listen(10)
+            self.broadcast_socket = server
+            print(f"[DEBUG] Broadcast Stream Server ay aktibo sa port {PORT}")
+        except Exception as e:
+            print(f"[ERROR sa Broadcast Server]: {e}")
+            return
+        
+        while True:
+            try:
+                server.settimeout(1.0)
+                conn, addr = server.accept()
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                threading.Thread(target=self.stream_handler, args=(conn,), daemon=True).start()
+            except socket.timeout:
+                continue
+            except:
+                break
+
+    def stream_handler(self, conn):
+        self.active_broadcast = True
+        while self.active_broadcast:
+            try:
+                screenshot = pyautogui.screenshot()
+                frame = np.array(screenshot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                
+                frame = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_AREA)
+                
+                _, encoded = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 78])
+                data = encoded.tobytes()
+                
+                header = struct.pack("!I", len(data))
+                conn.sendall(header + data)
+                
+                time.sleep(0.03)
+            except:
+                break
+        try:
+            conn.close()
+        except:
+            pass
+
     def check_login(self):
         username = self.user_entry.get()
         if username in self.USERS and self.USERS[username]["password"] == self.pass_entry.get():
             self.withdraw()
             role = self.USERS[username]["role"]
-            if role == "Teacher": dashboard = TeacherDashboard(master_app=self)
-            elif role == "Admin": dashboard = AdminDashboard(master_app=self)
+            if role == "Teacher": 
+                dashboard = TeacherDashboard(master_app=self)
+                self.active_teacher_dashboard = dashboard  # <--- I-save ang instance dito
+            elif role == "Admin": 
+                dashboard = AdminDashboard(master_app=self)
             dashboard.protocol("WM_DELETE_WINDOW", lambda: self.on_dashboard_close(dashboard))
         else: self.error_label.configure(text="Invalid credentials!", text_color="red")
 
     def on_dashboard_close(self, dashboard):
+        if dashboard == self.active_teacher_dashboard:
+            self.active_teacher_dashboard = None
         dashboard.destroy()
         self.deiconify()
 

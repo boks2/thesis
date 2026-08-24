@@ -54,5 +54,13 @@
     "tan": {
         "password": "tan",
         "role": "Student"
+    },
+    "ANGE": {
+        "password": "ANGE",
+        "role": "Student"
+    },
+    "TAN": {
+        "password": "TAN",
+        "role": "Student"
     }
 }

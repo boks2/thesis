@@ -28,20 +28,20 @@ class ScreenViewer(ctk.CTkToplevel):
         self.label.grid(row=0, column=0, sticky="nsew")
         
         # --- TOP CONTROLS OVERLAY ---
-        self.top_control_frame = ctk.CTkFrame(self, fg_color="#2b2b2b", corner_radius=6)
-        self.top_control_frame.place(relx=0.98, rely=0.02, anchor="ne")
+        self.top_control_frame = ctk.CTkFrame(self, fg_color="#1f1f1f", corner_radius=8, border_width=1, border_color="#383838")
+        self.top_control_frame.place(relx=0.97, rely=0.03, anchor="ne")
 
         self.btn_screenshot = ctk.CTkButton(
             self.top_control_frame, text="Screenshot", width=90, height=30,
             fg_color="#383838", hover_color="#505050", command=self.take_screenshot
         )
-        self.btn_screenshot.pack(side="left", padx=5, pady=5)
+        self.btn_screenshot.pack(side="left", padx=6, pady=6)
        
         self.btn_exit = ctk.CTkButton(
             self.top_control_frame, text="Exit", width=70, height=30,
             fg_color="#A83232", hover_color="#C84242", command=self.on_closing
         )
-        self.btn_exit.pack(side="left", padx=5, pady=5)
+        self.btn_exit.pack(side="left", padx=(0, 6), pady=6)
        
         self.bind("<Escape>", lambda e: self.on_closing())
         self.label.bind("<Configure>", self.on_resize)
@@ -61,7 +61,6 @@ class ScreenViewer(ctk.CTkToplevel):
             new_width = self.label.winfo_width()
             new_height = self.label.winfo_height()
             if new_width > 1 and new_height > 1:
-                # Kunin ang PIL image mula sa PhotoImage o i-resize kung kinakailangan
                 pil_image = ImageTk.getimage(img_tk)
                 self.latest_image = pil_image
                 resized_img = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
@@ -93,7 +92,6 @@ class ScreenViewer(ctk.CTkToplevel):
                 print(f"Screenshot saved as {filename}")
         except Exception as e:
             print(f"Error taking screenshot: {e}")
-
     def on_closing(self):
         self.running = False
         if self.control_mode:

@@ -12,7 +12,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REG_FILE = os.path.abspath(os.path.join(BASE_DIR, "..", "pending_accounts.json"))
 
 def start_log_listener(self):
-    """Tatakbo sa sariling thread para mag-abang ng registrations at logins sa Port 5001"""
+    """Tatakbo sa sariling thread para mag-abang ng registrations, logins, at expressions sa Port 5001"""
     log_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     log_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
@@ -72,9 +72,72 @@ def start_log_listener(self):
                 if username and hasattr(self, 'after'):
                     self.after(0, lambda u=username, ip=addr[0]: update_student_card_name(self, u, ip))
             
+            elif "EXPRESSION:" in command:
+                expr_content = command.replace("EXPRESSION:", "").strip()
+                if hasattr(self, 'after'):
+                    self.after(0, lambda e=expr_content: handle_student_expression(self, e, addr[0]))
+            
             conn.close()
         except Exception as e:
             print(f"[ERROR sa Log Listener]: {e}")
+
+def handle_student_expression(self, expression_text, sender_ip):
+    """Nag-a-update ng expression sa card UI gamit ang IP address o PC match format"""
+    print(f"[STUDENT EXPRESSION ALERT] mula {sender_ip}: {expression_text}")
+    try:
+        parts = expression_text.split("|")
+        if len(parts) >= 2:
+            expression = parts[1].strip()
+        else:
+            expression = expression_text.strip()
+            
+        target_card_info = None
+        matched_key = None
+        
+        # 1. Subukang direktang hanapin gamit ang buong sender_ip bilang key
+        if sender_ip in self.student_cards:
+            matched_key = sender_ip
+            target_card_info = self.student_cards[sender_ip]
+        else:
+            # 2. Hanapin sa bawat card kung nagtataglay ng IP o tugma ang PC suffix nito
+            for key, card_info in self.student_cards.items():
+                if sender_ip in key or (isinstance(card_info, dict) and sender_ip in str(card_info)):
+                    matched_key = key
+                    target_card_info = card_info
+                    break
+                
+                # Hanapin ang tugma base sa dulo ng IP (hal. PC 40 mula sa 192.168.100.40)
+                pc_suffix = f"PC {sender_ip.split('.')[-1]}"
+                if isinstance(card_info, dict) and pc_suffix in card_info.get("name", ""):
+                    matched_key = key
+                    target_card_info = card_info
+                    break
+
+        if target_card_info:
+            target_card_info["expression"] = expression
+            
+            current_name = target_card_info["name"]
+            
+            # Alisin ang dating nakalagay na expression para hindi magpatong-patong
+            if " | [" in current_name:
+                base_name = current_name.split(" | [")[0].strip()
+            else:
+                base_name = current_name.strip()
+                
+            # I-update ang pangalan na may kasamang expression format
+            target_card_info["name"] = f"{base_name} | [{expression}]"
+            
+            if "info_label" in target_card_info and target_card_info["info_label"].winfo_exists():
+                target_card_info["info_label"].configure(text=f"{target_card_info['name']} ({sender_ip})")
+                print(f"[SUCCESS] Na-update ang card para sa IP {sender_ip} na may expression: {expression}")
+        else:
+            print(f"[WARNING] Walang nahanap na student card para sa IP: {sender_ip}")
+            
+    except Exception as e:
+        print(f"[ERROR parsing expression]: {e}")
+
+    if hasattr(self, 'show_notification'):
+        self.show_notification(f"Expression: {expression_text}")
 
 def update_student_card_name(self, username, ip):
     pc_label = f"PC {ip.split('.')[-1]}"
@@ -82,8 +145,7 @@ def update_student_card_name(self, username, ip):
     
     if ip not in self.student_cards or "frame" not in self.student_cards[ip] or not self.student_cards[ip]["frame"].winfo_exists():
         from .student_cards import create_student_card
-        index = len(self.student_cards)
-        create_student_card(self, display_name, ip, index)
+        create_student_card(self, display_name, ip, len(self.student_cards))
     else:
         card_info = self.student_cards[ip]
         card_info["name"] = display_name
@@ -94,10 +156,8 @@ def update_student_card_name(self, username, ip):
             card_info["preview"].configure(text=f"{display_name}\n(Waiting for Live Stream...)")
 
 def start_global_listener(self):
-    # 1. Simulan agad ang Log Listener sa Port 5001
     threading.Thread(target=start_log_listener, args=(self,), daemon=True).start()
 
-    # 2. Listener para sa Grid Screen Streaming (Port 9998)
     def handle_client(conn, addr):
         student_ip = addr[0]
         self.connected_students[student_ip] = conn
@@ -109,8 +169,6 @@ def start_global_listener(self):
             raw_user_info = conn.recv(128).decode('utf-8', errors='ignore').strip()
             conn.settimeout(None)
             
-            print(f"[DEBUG STREAM] Natanggap mula sa {student_ip}: '{raw_user_info}'")
-            
             if "NAME:" in raw_user_info:
                 parts = raw_user_info.split("NAME:")
                 if len(parts) > 1:
@@ -119,7 +177,6 @@ def start_global_listener(self):
                         display_name = f"{actual_username} - PC {student_ip.split('.')[-1]}"
         except Exception as e:
             conn.settimeout(None)
-            print(f"[DEBUG STREAM] Timeout sa pangalan para sa {student_ip}: {e}")
 
         clean_username = display_name.split(" - ")[0]
         self.after(0, lambda u=clean_username, ip=student_ip: update_student_card_name(self, u, ip))
@@ -179,7 +236,6 @@ def start_global_listener(self):
            
     threading.Thread(target=stream_listener, daemon=True).start()
 
-    # 3. [IDINAGDAG] Listener para sa Remote View / Remote Control (Port 9997)
     def handle_remote_client(conn, addr):
         student_ip = addr[0]
         try:
@@ -198,7 +254,6 @@ def start_global_listener(self):
                     image = Image.open(io.BytesIO(frame_data))
                     img_tk = ImageTk.PhotoImage(image)
                     
-                    # Ipasa ang frame sa aktibong remote viewer window kung bukas ito
                     if hasattr(self, 'active_viewers') and student_ip in self.active_viewers:
                         viewer = self.active_viewers[student_ip]
                         if viewer.winfo_exists():
@@ -218,7 +273,6 @@ def start_global_listener(self):
             threading.Thread(target=handle_remote_client, args=(conn, addr), daemon=True).start()
 
     threading.Thread(target=remote_listener, daemon=True).start()
-
 
 def update_thumbnail_frame(self, ip, img_tk):
     if ip in self.student_cards:

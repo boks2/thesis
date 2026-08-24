@@ -26,9 +26,9 @@ class TeacherDashboard(ctk.CTkToplevel):
         self.connected_students = {}
         self.student_cards = {}
         self.login_history_data = []
-        self.active_viewers = {}  # Dito itatala ang mga bukas na Remote View/Control windows
-        self.is_broadcasting_demo = False  # Flag para sa Fullscreen Demo
-        self.btn_fullscreen_demo = None  # Reference para sa toolbar button ng demo
+        self.active_viewers = {}  
+        self.is_broadcasting_demo = False  
+        self.btn_fullscreen_demo = None  
         
         self.title("Teacher Dashboard")
         self.geometry("1200x800")
@@ -75,17 +75,13 @@ class TeacherDashboard(ctk.CTkToplevel):
             )
             btn.pack(side="left", padx=1, pady=5)
             
-            # Kunin ang reference ng Fullscreen demo button para mabago ang text mamaya
             if btn_text == "Fullscreen demo":
                 self.btn_fullscreen_demo = btn
 
         # --- MAIN GRID PARA SA MGA PC NG ESTUDYANTE ---
         setup_grid_layout(self)
         
-        # Direktang pinapagana ang listener para sa Port 5001 at 9998
         run_global_listener(self)
-
-        # Simulan ang Veyon-style Auto-Discovery Broadcaster sa background
         self.start_teacher_broadcaster()
 
         # --- BOTTOM STATUS BAR ---
@@ -101,90 +97,118 @@ class TeacherDashboard(ctk.CTkToplevel):
         self.search_entry = ctk.CTkEntry(self.bottom_bar, placeholder_text="Search users and computers", width=220)
         self.search_entry.pack(side="left", padx=15, pady=5)
 
+    def show_notification(self, message):
+        pass
+
     def start_teacher_broadcast(self):
-        """Mabilis, HD, at Zero-Lag Fullscreen Demo Broadcast na may Red Mouse Cursor"""
-        from concurrent.futures import ThreadPoolExecutor
-        
-        def broadcast_loop():
+        """Veyon-Style Realtime Broadcast Server (Optimized & Non-Blocking)"""
+        def broadcast_server_loop():
             BROADCAST_PORT = 9996
-            # Dynamic thread pool para sa sabay-sabay na koneksyon sa mga estudyante
-            executor = ThreadPoolExecutor(max_workers=12)
+            server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             
-            def send_to_student(ip, header, img_data):
-                try:
-                    demo_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    demo_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    demo_sock.settimeout(0.03)
-                    demo_sock.connect((ip, BROADCAST_PORT))
-                    demo_sock.sendall(header + img_data)
-                    demo_sock.close()
-                except:
-                    pass
+            try:
+                server_sock.bind(('0.0.0.0', BROADCAST_PORT))
+                server_sock.listen(15)
+                server_sock.settimeout(0.5)
+            except Exception as e:
+                print(f"Broadcast bind error: {e}")
+                return
+
+            clients = []
+            
+            def accept_clients():
+                while self.is_broadcasting_demo:
+                    try:
+                        conn, addr = server_sock.accept()
+                        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                        conn.setblocking(False)
+                        clients.append(conn)
+                    except socket.timeout:
+                        continue
+                    except:
+                        break
+
+            accept_thread = threading.Thread(target=accept_clients, daemon=True)
+            accept_thread.start()
 
             with mss.mss() as sct:
                 monitor = sct.monitors[1]
                 
                 while self.is_broadcasting_demo:
+                    loop_start = time.time()
                     try:
-                        # 1. Kunin ang screen ng teacher
                         img = sct.grab(monitor)
                         frame = np.array(img)
                         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
                         
-                        # 2. Idikit ang maliwanag na pulang bilog para sa mouse cursor
                         try:
                             mouse_x, mouse_y = pyautogui.position()
-                            # Solid na pulang bilog (BGR: 0, 0, 255)
                             cv2.circle(frame_bgr, (mouse_x, mouse_y), 14, (0, 0, 255), -1)
-                            # Puting border para litaw sa kahit anong background
                             cv2.circle(frame_bgr, (mouse_x, mouse_y), 16, (255, 255, 255), 2)
                         except:
                             pass
                         
-                        # 3. I-resize sa 720p (1280x720) para malinaw basahin ang teksto nang hindi bumabagal
-                        frame_resized = cv2.resize(frame_bgr, (1280, 720), interpolation=cv2.INTER_LINEAR)
-                        
-                        # 4. Itaas sa JPEG Quality 75 para mawala ang pagkalabo (blurry)
-                        _, img_encoded = cv2.imencode('.jpg', frame_resized, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                        frame_resized = cv2.resize(frame_bgr, (1280, 720), interpolation=cv2.INTER_AREA)
+                        _, img_encoded = cv2.imencode('.jpg', frame_resized, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
                         img_data = img_encoded.tobytes()
                         header = struct.pack("!I", len(img_data))
+                        payload = header + img_data
                         
-                        # 5. I-dispatch agad sa lahat ng estudyante nang sabay-sabay
-                        student_ips = list(self.student_cards.keys())
-                        if student_ips:
-                            [executor.submit(send_to_student, ip, header, img_data) for ip in student_ips]
+                        dead_clients = []
+                        for client in clients:
+                            try:
+                                client.sendall(payload)
+                            except:
+                                dead_clients.append(client)
                         
+                        for dead in dead_clients:
+                            if dead in clients:
+                                clients.remove(dead)
+                            try:
+                                dead.close()
+                            except:
+                                pass
+                                
                     except Exception as e:
-                        print(f"Broadcast demo error: {e}")
-                        break
+                        print(f"Broadcast loop error: {e}")
+                    
+                    elapsed = time.time() - loop_start
+                    if elapsed < 0.03:
+                        time.sleep(0.03 - elapsed)
             
-            executor.shutdown(wait=False)
+            try:
+                server_sock.close()
+            except:
+                pass
+                
+            for client in clients:
+                try:
+                    client.close()
+                except:
+                    pass
 
         if not self.is_broadcasting_demo:
             self.is_broadcasting_demo = True
-            
             if self.btn_fullscreen_demo:
                 self.btn_fullscreen_demo.configure(text="STOP", fg_color="#a83232", hover_color="#c94444")
             
             for ip in self.student_cards.keys():
                 send_command(ip, "START_DEMO")
             
-            time.sleep(0.3)
-            threading.Thread(target=broadcast_loop, daemon=True).start()
-            print("[DEBUG] Nagsimula na ang Malinaw at Mabilis na HD Broadcast.")
+            time.sleep(0.2)
+            threading.Thread(target=broadcast_server_loop, daemon=True).start()
+            print("[DEBUG] Nagsimula na ang na-optimize na Broadcast Server.")
         else:
             self.is_broadcasting_demo = False
-            
             if self.btn_fullscreen_demo:
                 self.btn_fullscreen_demo.configure(text="Fullscreen demo", fg_color="#383838", hover_color="#505050")
-            
-            print("[DEBUG] Huminto na ang Fullscreen Demo Broadcast.")
             
             for ip in self.student_cards.keys():
                 send_command(ip, "STOP_DEMO")
 
     def start_teacher_broadcaster(self):
-        # Dummy placeholder kung kailangan para sa auto-discovery background thread kung hiwalay ang implementation
         pass
 
     def refresh_connections(self):
@@ -215,7 +239,6 @@ class TeacherDashboard(ctk.CTkToplevel):
         context_menu = tk.Menu(self, tearoff=0, bg="#f0f0f0", fg="black", font=("Arial", 10))
         context_menu.add_command(label="Remote View", command=lambda: self.open_full_view(ip, is_control=False))
         
-        # Kapag nagba-broadcast na, "Stop demo" ang lalabas at itinigil ito; kung hindi, "Fullscreen demo"
         if self.is_broadcasting_demo:
             context_menu.add_command(label="Stop demo", command=lambda: self.start_teacher_broadcast())
         else:
