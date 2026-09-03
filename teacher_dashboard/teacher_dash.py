@@ -23,6 +23,8 @@ from .inbox_window import open_inbox_window
 class TeacherDashboard(ctk.CTkToplevel):
     def __init__(self, master_app):
         super().__init__()
+        self.inbox_logs_data = []
+        self.current_inbox_win = None 
         self.master_app = master_app
         self.connected_students = {}
         self.student_cards = {}
@@ -30,7 +32,7 @@ class TeacherDashboard(ctk.CTkToplevel):
         self.active_viewers = {}  
         self.is_broadcasting_demo = False  
         self.btn_fullscreen_demo = None  
-        self.student_histories = {} # Dito iimbak ang website/app history ng bawat IP
+        self.student_histories = {} 
         
         self.title("Teacher Dashboard")
         self.geometry("1200x800")
@@ -81,6 +83,19 @@ class TeacherDashboard(ctk.CTkToplevel):
             if btn_text == "Fullscreen demo":
                 self.btn_fullscreen_demo = btn
 
+        # --- TEST BUTTON PARA SA INBOX ---
+        test_inbox_btn = ctk.CTkButton(
+            self.top_toolbar, 
+            text="Test Inbox Log", 
+            fg_color="#b58900", 
+            hover_color="#856300",
+            width=75,
+            height=50,
+            font=ctk.CTkFont(size=10),
+            command=self.add_test_log
+        )
+        test_inbox_btn.pack(side="left", padx=1, pady=5)
+
         # --- MAIN GRID PARA SA MGA PC NG ESTUDYANTE ---
         setup_grid_layout(self)
         
@@ -100,24 +115,33 @@ class TeacherDashboard(ctk.CTkToplevel):
         self.search_entry = ctk.CTkEntry(self.bottom_bar, placeholder_text="Search users and computers", width=220)
         self.search_entry.pack(side="left", padx=15, pady=5)
 
+    def add_test_log(self):
+        """Pansamantalang function para magdagdag ng dummy log at i-test ang Inbox UI"""
+        import datetime
+        new_log = {
+            "time": datetime.datetime.now().strftime('%H:%M:%S'),
+            "message": "[192.168.1.50] Test Expression: Hello Teacher!"
+        }
+        self.inbox_logs_data.append(new_log)
+        print(f"[DEBUG] Bagong log idinagdag: {new_log}")
+        self.refresh_inbox_ui()
+
+    def refresh_inbox_ui(self):
+        """Kusa nitong nire-refresh ang Inbox window kapag may bagong pumasok na data"""
+        if self.current_inbox_win and self.current_inbox_win.winfo_exists():
+            try:
+                self.current_inbox_win.destroy()
+            except:
+                pass
+            open_inbox_window(self)
+
     def update_history_ui(self, ip):
-        """Inayos upang i-refresh ang history UI kung ito ay naka-bind o aktibo."""
-        logs = self.student_histories.get(ip, [])
-        if hasattr(self, 'current_history_ip') and self.current_history_ip == ip:
-            if hasattr(self, 'history_textbox') and self.history_textbox.winfo_exists():
-                self.history_textbox.delete("1.0", "end")
-                if logs:
-                    for log in logs:
-                        self.history_textbox.insert("end", f"- {log}\n")
-                else:
-                    self.history_textbox.insert("end", "- Walang naitalang aktibidad para sa IP na ito.\n")
-        print(f"[UI UPDATE] Na-refresh ang history logs para sa IP: {ip}")
+        pass
 
     def show_notification(self, message):
         pass
 
     def start_teacher_broadcast(self):
-        """Veyon-Style Realtime Broadcast Server (Optimized & Non-Blocking)"""
         def broadcast_server_loop():
             BROADCAST_PORT = 9996
             server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

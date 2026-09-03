@@ -58,7 +58,7 @@ class LoginApp(ctk.CTk):
         while True:
             try:
                 conn, addr = server.accept()
-                data = conn.recv(1024).decode()
+                data = conn.recv(2048).decode('utf-8', errors='ignore').strip()
                 
                 if "ACTION: LOGIN_CHECK" in data:
                     self.handle_login_check(conn, data)
@@ -66,10 +66,23 @@ class LoginApp(ctk.CTk):
                     self.process_register(data)
                     conn.close()
                 elif "EXPRESSION:" in data:
-                    # Masalo ang expression galing sa student at ipasa sa teacher dashboard
                     expr_content = data.replace("EXPRESSION:", "").strip()
                     print(f"[STUDENT EXPRESSION] mula {addr[0]}: {expr_content}")
+                    
                     if self.active_teacher_dashboard:
+                        if not hasattr(self.active_teacher_dashboard, 'inbox_logs_data'):
+                            self.active_teacher_dashboard.inbox_logs_data = []
+                            
+                        new_log = {
+                            "time": datetime.datetime.now().strftime('%H:%M:%S'),
+                            "message": f"[{addr[0]}] Expression: {expr_content}"
+                        }
+                        self.active_teacher_dashboard.inbox_logs_data.append(new_log)
+                        
+                        # I-refresh ang UI ng Inbox at Student Card nang sabay
+                        self.active_teacher_dashboard.after(
+                            0, lambda: self.active_teacher_dashboard.refresh_inbox_ui()
+                        )
                         self.active_teacher_dashboard.after(
                             0, lambda e=expr_content, ip=addr[0]: handle_student_expression(self.active_teacher_dashboard, e, ip)
                         )
@@ -154,7 +167,7 @@ class LoginApp(ctk.CTk):
                         break
         except: pass
 
-    # --- FULL SCREEN DEMO BROADCAST SERVER (Naka-optimize para sa Wi-Fi / Real-Time) ---
+    # --- FULL SCREEN DEMO BROADCAST SERVER ---
     def broadcast_stream_server(self):
         PORT = 9996
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -210,7 +223,7 @@ class LoginApp(ctk.CTk):
             role = self.USERS[username]["role"]
             if role == "Teacher": 
                 dashboard = TeacherDashboard(master_app=self)
-                self.active_teacher_dashboard = dashboard  # <--- I-save ang instance dito
+                self.active_teacher_dashboard = dashboard  
             elif role == "Admin": 
                 dashboard = AdminDashboard(master_app=self)
             dashboard.protocol("WM_DELETE_WINDOW", lambda: self.on_dashboard_close(dashboard))

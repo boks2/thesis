@@ -7,8 +7,7 @@ from datetime import datetime
 from PIL import Image, ImageTk
 
 LOG_PORT = 5001
-STREAM_PORT = 9998
-TEACHER_IP = "192.168.100.71"  # Palitan kung kinakailangan o gamitin ang "0.0.0.0" para sa lahat ng interfaces
+TEACHER_IP = "192.168.100.71"  # Palitan kung iba ang IP ng Teacher PC
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REG_FILE = os.path.abspath(os.path.join(BASE_DIR, "..", "pending_accounts.json"))
@@ -50,7 +49,7 @@ def start_log_listener(self):
                         with open(REG_FILE, "r") as f:
                             try: data = json.load(f)
                             except: data = []
-                            
+                    
                     if not any(acc["username"] == username for acc in data):
                         data.append({"username": username, "password": password, "status": "Pending"})
                         with open(REG_FILE, "w") as f:
@@ -110,7 +109,6 @@ def handle_student_activity(self, activity_text, sender_ip):
             print(f"[ERROR sa pag-refresh ng Inbox UI]: {e}")
 
 def handle_student_expression(self, expression_text, sender_ip):
-    """Nag-a-update ng expression sa card UI gamit ang IP address o PC match format"""
     try:
         parts = expression_text.split("|")
         expression = parts[1].strip() if len(parts) >= 2 else expression_text.strip()
@@ -123,33 +121,16 @@ def handle_student_expression(self, expression_text, sender_ip):
                 if sender_ip in key or (isinstance(card_info, dict) and sender_ip in str(card_info)):
                     target_card_info = card_info
                     break
-                
-                pc_suffix = f"PC {sender_ip.split('.')[-1]}"
-                if isinstance(card_info, dict) and pc_suffix in card_info.get("name", ""):
-                    target_card_info = card_info
-                    break
 
         if target_card_info:
             target_card_info["expression"] = expression
-            current_name = target_card_info["name"]
-            
-            if " | [" in current_name:
-                base_name = current_name.split(" | [")[0].strip()
-            else:
-                base_name = current_name.strip()
-                
-            target_card_info["name"] = f"{base_name} | [{expression}]"
+            current_name = target_card_info["name"].split(" | [")[0].strip()
+            target_card_info["name"] = f"{current_name} | [{expression}]"
             
             if "info_label" in target_card_info and target_card_info["info_label"].winfo_exists():
                 target_card_info["info_label"].configure(text=f"{target_card_info['name']} ({sender_ip})")
-                print(f"[SUCCESS] Na-update ang card para sa IP {sender_ip} na may expression: {expression}")
-        else:
-            print(f"[WARNING] Walang nahanap na student card para sa IP: {sender_ip}")
     except Exception as e:
         print(f"[ERROR parsing expression]: {e}")
-
-    if hasattr(self, 'show_notification'):
-        self.show_notification(f"Expression: {expression_text}")
 
 def update_student_card_name(self, username, ip):
     pc_label = f"PC {ip.split('.')[-1]}"
@@ -163,14 +144,12 @@ def update_student_card_name(self, username, ip):
         card_info["name"] = display_name
         if "info_label" in card_info and card_info["info_label"].winfo_exists():
             card_info["info_label"].configure(text=f"{display_name} ({ip})")
-            
-        if "preview" in card_info and card_info["preview"].winfo_exists():
-            card_info["preview"].configure(text=f"{display_name}\n(Waiting for Live Stream...)")
 
 def start_global_listener(self):
-    # Simulan ang Log / Expression / Activity Listener sa Port 5001
+    # 1. Start Log Listener (Port 5001)
     threading.Thread(target=start_log_listener, args=(self,), daemon=True).start()
 
+    # 2. Main Stream Listener (Port 9998)
     def handle_client(conn, addr):
         student_ip = addr[0]
         self.connected_students[student_ip] = conn
@@ -193,22 +172,21 @@ def start_global_listener(self):
         clean_username = display_name.split(" - ")[0]
         self.after(0, lambda u=clean_username, ip=student_ip: update_student_card_name(self, u, ip))
         self.after(0, lambda: record_login(self, display_name, student_ip))
-       
+        
         try:
             while True:
                 raw_length = conn.recv(4)
                 if not raw_length: break
                 frame_length = int.from_bytes(raw_length, byteorder='big')
-               
+                
                 frame_data = b""
                 while len(frame_data) < frame_length:
                     packet = conn.recv(frame_length - len(frame_data))
                     if not packet: break
                     frame_data += packet
-                   
+                
                 if len(frame_data) == frame_length:
-                    image = Image.open(io.BytesIO(frame_data))
-                    image = image.resize((240, 150), Image.Resampling.LANCZOS)
+                    image = Image.open(io.BytesIO(frame_data)).resize((240, 150), Image.Resampling.LANCZOS)
                     img_tk = ImageTk.PhotoImage(image)
                     self.after(0, lambda ip=student_ip, img=img_tk: update_thumbnail_frame(self, ip, img))
         except Exception as e:
@@ -222,15 +200,10 @@ def start_global_listener(self):
                 if student_ip in self.student_cards:
                     try:
                         card_info = self.student_cards[student_ip]
-                        if isinstance(card_info, dict):
-                            if "card" in card_info and card_info["card"].winfo_exists():
-                                card_info["card"].destroy()
-                            elif "frame" in card_info and card_info["frame"].winfo_exists():
-                                card_info["frame"].destroy()
-                        elif hasattr(card_info, "destroy"):
-                            card_info.destroy()
-                    except Exception as e:
-                        print(f"Error sa pagbura ng card para sa {student_ip}: {e}")
+                        if isinstance(card_info, dict) and "frame" in card_info and card_info["frame"].winfo_exists():
+                            card_info["frame"].destroy()
+                    except:
+                        pass
                     del self.student_cards[student_ip]
 
             if hasattr(self, 'after'):
@@ -240,15 +213,52 @@ def start_global_listener(self):
     def stream_listener():
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((TEACHER_IP, STREAM_PORT))
+        server.bind((TEACHER_IP, 9998))
         server.listen(10)
-        print(f"[DEBUG] Stream listener ay BUKAS at ACTIVE sa {TEACHER_IP}:{STREAM_PORT}")
         while True:
             conn, addr = server.accept()
             threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
-           
-    # Simulan ang Live Stream Listener sa Port 9998
+            
     threading.Thread(target=stream_listener, daemon=True).start()
+
+    # 3. Remote View Listener (Port 9997)
+    def handle_remote_client(conn, addr):
+        student_ip = addr[0]
+        try:
+            while True:
+                raw_length = conn.recv(4)
+                if not raw_length: break
+                frame_length = int.from_bytes(raw_length, byteorder='big')
+                
+                frame_data = b""
+                while len(frame_data) < frame_length:
+                    packet = conn.recv(frame_length - len(frame_data))
+                    if not packet: break
+                    frame_data += packet
+                
+                if len(frame_data) == frame_length:
+                    image = Image.open(io.BytesIO(frame_data))
+                    img_tk = ImageTk.PhotoImage(image)
+                    
+                    if hasattr(self, 'active_viewers') and student_ip in self.active_viewers:
+                        viewer = self.active_viewers[student_ip]
+                        if viewer.winfo_exists():
+                            viewer.after(0, lambda img=img_tk, v=viewer: v.update_image(img))
+        except Exception as e:
+            print(f"Remote view error for {student_ip}: {e}")
+        finally:
+            conn.close()
+
+    def remote_listener():
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((TEACHER_IP, 9997))
+        server.listen(10)
+        while True:
+            conn, addr = server.accept()
+            threading.Thread(target=handle_remote_client, args=(conn, addr), daemon=True).start()
+
+    threading.Thread(target=remote_listener, daemon=True).start()
 
 def update_thumbnail_frame(self, ip, img_tk):
     if ip in self.student_cards:
