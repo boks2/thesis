@@ -1,6 +1,13 @@
 import customtkinter as ctk
 import tkinter as tk
-from .student_webcam import StudentWebcamOverlay
+import socket
+import threading
+import time
+import struct
+import mss
+import numpy as np
+import cv2
+import pyautogui
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 from .network_utils import send_command
@@ -11,13 +18,7 @@ from .history_window import open_history_window
 from .student_cards import setup_grid_layout, create_student_card
 from .network_listeners import start_global_listener as run_global_listener, update_thumbnail_frame, record_login, record_logout
 from .account_approvals import open_account_approvals
-from .dialogs import (
-    open_text_message_dialog, 
-    open_single_text_message_dialog, 
-    open_website_dialog, 
-    open_single_website_dialog
-)
-from .teacher_broadcast import toggle_teacher_broadcast
+from .inbox_window import open_inbox_window  
 
 class TeacherDashboard(ctk.CTkToplevel):
     def __init__(self, master_app):
@@ -29,6 +30,7 @@ class TeacherDashboard(ctk.CTkToplevel):
         self.active_viewers = {}  
         self.is_broadcasting_demo = False  
         self.btn_fullscreen_demo = None  
+        self.student_histories = {} # Dito iimbak ang website/app history ng bawat IP
         
         self.title("Teacher Dashboard")
         self.geometry("1200x800")
@@ -39,7 +41,7 @@ class TeacherDashboard(ctk.CTkToplevel):
         
         toolbar_items = [
             ("Monitoring", None),
-            ("Fullscreen demo", lambda: toggle_teacher_broadcast(self)),
+            ("Fullscreen demo", lambda: self.start_teacher_broadcast()),
             ("Window demo", None),
             ("Lock", self.lock_all_students),
             ("Unlock", self.unlock_all_students),
@@ -48,9 +50,10 @@ class TeacherDashboard(ctk.CTkToplevel):
             ("Power down", self.shutdown_all_students),
             ("Sleep", self.sleep_all_students),
             ("Logout user", None),
-            ("Text message", lambda: open_text_message_dialog(self)),
+            ("Text message", self.open_text_message_dialog),
             ("Run program", None),
-            ("Open website", lambda: open_website_dialog(self)),
+            ("Open website", self.open_website_dialog),
+            ("Inbox", lambda: open_inbox_window(self)), 
             ("Screenshot", None),
             ("History", lambda: open_history_window(self, self.login_history_data)),
             ("Approvals", lambda: open_account_approvals(self)),
@@ -58,8 +61,8 @@ class TeacherDashboard(ctk.CTkToplevel):
         ]
         
         for btn_text, btn_command in toolbar_items:
-            fg_col = "#1f6aa5" if btn_text == "Refresh" else "#383838"
-            hover_col = "#144870" if btn_text == "Refresh" else "#505050"
+            fg_col = "#1f6aa5" if btn_text in ("Refresh", "Inbox") else "#383838"
+            hover_col = "#144870" if btn_text in ("Refresh", "Inbox") else "#505050"
             
             btn = ctk.CTkButton(
                 self.top_toolbar,
@@ -97,8 +100,129 @@ class TeacherDashboard(ctk.CTkToplevel):
         self.search_entry = ctk.CTkEntry(self.bottom_bar, placeholder_text="Search users and computers", width=220)
         self.search_entry.pack(side="left", padx=15, pady=5)
 
+    def update_history_ui(self, ip):
+        """Inayos upang i-refresh ang history UI kung ito ay naka-bind o aktibo."""
+        logs = self.student_histories.get(ip, [])
+        if hasattr(self, 'current_history_ip') and self.current_history_ip == ip:
+            if hasattr(self, 'history_textbox') and self.history_textbox.winfo_exists():
+                self.history_textbox.delete("1.0", "end")
+                if logs:
+                    for log in logs:
+                        self.history_textbox.insert("end", f"- {log}\n")
+                else:
+                    self.history_textbox.insert("end", "- Walang naitalang aktibidad para sa IP na ito.\n")
+        print(f"[UI UPDATE] Na-refresh ang history logs para sa IP: {ip}")
+
     def show_notification(self, message):
         pass
+
+    def start_teacher_broadcast(self):
+        """Veyon-Style Realtime Broadcast Server (Optimized & Non-Blocking)"""
+        def broadcast_server_loop():
+            BROADCAST_PORT = 9996
+            server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            
+            try:
+                server_sock.bind(('0.0.0.0', BROADCAST_PORT))
+                server_sock.listen(15)
+                server_sock.settimeout(0.5)
+            except Exception as e:
+                print(f"Broadcast bind error: {e}")
+                return
+
+            clients = []
+            
+            def accept_clients():
+                while self.is_broadcasting_demo:
+                    try:
+                        conn, addr = server_sock.accept()
+                        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                        conn.setblocking(False)
+                        clients.append(conn)
+                    except socket.timeout:
+                        continue
+                    except:
+                        break
+
+            accept_thread = threading.Thread(target=accept_clients, daemon=True)
+            accept_thread.start()
+
+            with mss.mss() as sct:
+                monitor = sct.monitors[1]
+                
+                while self.is_broadcasting_demo:
+                    loop_start = time.time()
+                    try:
+                        img = sct.grab(monitor)
+                        frame = np.array(img)
+                        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                        
+                        try:
+                            mouse_x, mouse_y = pyautogui.position()
+                            cv2.circle(frame_bgr, (mouse_x, mouse_y), 14, (0, 0, 255), -1)
+                            cv2.circle(frame_bgr, (mouse_x, mouse_y), 16, (255, 255, 255), 2)
+                        except:
+                            pass
+                        
+                        frame_resized = cv2.resize(frame_bgr, (1280, 720), interpolation=cv2.INTER_AREA)
+                        _, img_encoded = cv2.imencode('.jpg', frame_resized, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                        img_data = img_encoded.tobytes()
+                        header = struct.pack("!I", len(img_data))
+                        payload = header + img_data
+                        
+                        dead_clients = []
+                        for client in clients:
+                            try:
+                                client.sendall(payload)
+                            except:
+                                dead_clients.append(client)
+                        
+                        for dead in dead_clients:
+                            if dead in clients:
+                                clients.remove(dead)
+                            try:
+                                dead.close()
+                            except:
+                                pass
+                                
+                    except Exception as e:
+                        print(f"Broadcast loop error: {e}")
+                    
+                    elapsed = time.time() - loop_start
+                    if elapsed < 0.03:
+                        time.sleep(0.03 - elapsed)
+            
+            try:
+                server_sock.close()
+            except:
+                pass
+                
+            for client in clients:
+                try:
+                    client.close()
+                except:
+                    pass
+
+        if not self.is_broadcasting_demo:
+            self.is_broadcasting_demo = True
+            if self.btn_fullscreen_demo:
+                self.btn_fullscreen_demo.configure(text="STOP", fg_color="#a83232", hover_color="#c94444")
+            
+            for ip in self.student_cards.keys():
+                send_command(ip, "START_DEMO")
+            
+            time.sleep(0.2)
+            threading.Thread(target=broadcast_server_loop, daemon=True).start()
+            print("[DEBUG] Nagsimula na ang na-optimize na Broadcast Server.")
+        else:
+            self.is_broadcasting_demo = False
+            if self.btn_fullscreen_demo:
+                self.btn_fullscreen_demo.configure(text="Fullscreen demo", fg_color="#383838", hover_color="#505050")
+            
+            for ip in self.student_cards.keys():
+                send_command(ip, "STOP_DEMO")
 
     def start_teacher_broadcaster(self):
         pass
@@ -132,17 +256,17 @@ class TeacherDashboard(ctk.CTkToplevel):
         context_menu.add_command(label="Remote View", command=lambda: self.open_full_view(ip, is_control=False))
         
         if self.is_broadcasting_demo:
-            context_menu.add_command(label="Stop demo", command=lambda: toggle_teacher_broadcast(self))
+            context_menu.add_command(label="Stop demo", command=lambda: self.start_teacher_broadcast())
         else:
-            context_menu.add_command(label="Fullscreen demo", command=lambda: toggle_teacher_broadcast(self))
+            context_menu.add_command(label="Fullscreen demo", command=lambda: self.start_teacher_broadcast())
             
         context_menu.add_separator()
         context_menu.add_command(label="Lock", command=lambda: send_command(ip, "LOCK"))
         context_menu.add_command(label="Unlock", command=lambda: send_command(ip, "UNLOCK"))
         context_menu.add_separator()
-        context_menu.add_command(label="Message", command=lambda: open_single_text_message_dialog(self, ip))
+        context_menu.add_command(label="Message", command=lambda: self.open_single_text_message_dialog(ip))
         context_menu.add_separator()
-        context_menu.add_command(label="Open website", command=lambda: open_single_website_dialog(self, ip))
+        context_menu.add_command(label="Open website", command=lambda: self.open_single_website_dialog(ip))
         context_menu.add_separator()
         context_menu.add_command(label="Reboot", command=lambda: send_command(ip, "REBOOT"))
         context_menu.add_command(label="Sleep", command=lambda: send_command(ip, "SLEEP"))
@@ -154,6 +278,76 @@ class TeacherDashboard(ctk.CTkToplevel):
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def open_text_message_dialog(self):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Send Text Message to Students")
+        dialog.geometry("400x250")
+        dialog.attributes("-topmost", True)
+        ctk.CTkLabel(dialog, text="I-type ang mensahe para sa lahat ng estudyante:", font=("Arial", 12, "bold")).pack(pady=15)
+        msg_entry = ctk.CTkTextbox(dialog, width=350, height=100)
+        msg_entry.pack(pady=5)
+        
+        def send_msg():
+            message = msg_entry.get("1.0", "end-1c").strip()
+            if message:
+                for ip in self.student_cards.keys():
+                    send_command(ip, f"MSG:{message}")
+                dialog.destroy()
+                
+        ctk.CTkButton(dialog, text="Broadcast Message", fg_color="green", command=send_msg).pack(pady=15)
+
+    def open_single_text_message_dialog(self, ip):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Send Message to {ip}")
+        dialog.geometry("400x250")
+        dialog.attributes("-topmost", True)
+        ctk.CTkLabel(dialog, text=f"I-type ang mensahe para sa PC ({ip}):", font=("Arial", 12, "bold")).pack(pady=15)
+        msg_entry = ctk.CTkTextbox(dialog, width=350, height=100)
+        msg_entry.pack(pady=5)
+        
+        def send_single_msg():
+            message = msg_entry.get("1.0", "end-1c").strip()
+            if message:
+                send_command(ip, f"MSG:{message}")
+                dialog.destroy()
+                
+        ctk.CTkButton(dialog, text="Send Message", fg_color="green", command=send_single_msg).pack(pady=15)
+
+    def open_website_dialog(self):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Open Website on All Students")
+        dialog.geometry("400x200")
+        dialog.attributes("-topmost", True)
+        ctk.CTkLabel(dialog, text="I-type ang URL (hal. https://www.facebook.com):", font=("Arial", 12, "bold")).pack(pady=15)
+        url_entry = ctk.CTkEntry(dialog, width=350, placeholder_text="https://...")
+        url_entry.pack(pady=5)
+        
+        def send_url():
+            url = url_entry.get().strip()
+            if url:
+                for ip in self.student_cards.keys():
+                    send_command(ip, f"URL:{url}")
+                dialog.destroy()
+                
+        ctk.CTkButton(dialog, text="Open Website", fg_color="green", command=send_url).pack(pady=15)
+
+    def open_single_website_dialog(self, ip):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Open Website on {ip}")
+        dialog.geometry("400x200")
+        dialog.attributes("-topmost", True)
+        ctk.CTkLabel(dialog, text=f"I-type ang URL para sa PC ({ip}):", font=("Arial", 12, "bold")).pack(pady=15)
+        url_entry = ctk.CTkEntry(dialog, width=350, placeholder_text="https://...")
+        url_entry.pack(pady=5)
+        
+        def send_single_url():
+            url = url_entry.get().strip()
+            if url:
+                send_command(ip, f"URL:{url}")
+                dialog.destroy()
+                
+        ctk.CTkButton(dialog, text="Open Website", fg_color="green", command=send_single_url).pack(pady=15)
 
     def open_full_view(self, student_ip, is_control=False):
         try:

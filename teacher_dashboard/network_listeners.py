@@ -7,30 +7,31 @@ from datetime import datetime
 from PIL import Image, ImageTk
 
 LOG_PORT = 5001
+STREAM_PORT = 9998
+TEACHER_IP = "192.168.100.71"  # Palitan kung kinakailangan o gamitin ang "0.0.0.0" para sa lahat ng interfaces
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REG_FILE = os.path.abspath(os.path.join(BASE_DIR, "..", "pending_accounts.json"))
 
 def start_log_listener(self):
-    """Tatakbo sa sariling thread para mag-abang ng registrations, logins, at expressions sa Port 5001"""
+    """Tatakbo sa sariling thread para mag-abang ng registrations, logins, expressions, at active window activities sa Port 5001"""
     log_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     log_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
     try:
-        log_server.bind(("0.0.0.0", LOG_PORT))
+        log_server.bind((TEACHER_IP, LOG_PORT))
         log_server.listen(10)
         print(f"\n==========================================")
-        print(f"[DEBUG] Log listener ay BUKAS at ACTIVE sa port {LOG_PORT}")
+        print(f"[DEBUG] Log listener ay BUKAS at ACTIVE sa {TEACHER_IP}:{LOG_PORT}")
         print(f"==========================================\n")
     except Exception as e:
-        print(f"[ERROR] Hindi ma-bind ang Port {LOG_PORT}: {e}")
+        print(f"[ERROR] Hindi ma-bind ang IP/Port {TEACHER_IP}:{LOG_PORT}: {e}")
         return
 
     while True:
         try:
             conn, addr = log_server.accept()
-            command = conn.recv(1024).decode().strip()
-            print(f"[DEBUG] May pumasok mula sa {addr[0]}: '{command}'")
+            command = conn.recv(2048).decode('utf-8', errors='ignore').strip()
             
             if "ACTION: REGISTER" in command:
                 parts = command.split("|")
@@ -74,57 +75,69 @@ def start_log_listener(self):
             
             elif "EXPRESSION:" in command:
                 expr_content = command.replace("EXPRESSION:", "").strip()
+                print(f"[STUDENT EXPRESSION] mula {addr[0]}: {expr_content}")
                 if hasattr(self, 'after'):
                     self.after(0, lambda e=expr_content: handle_student_expression(self, e, addr[0]))
+            
+            elif "ACTIVITY:" in command or "activity:" in command:
+                activity_content = command.replace("ACTIVITY:", "").replace("activity:", "").strip()
+                print(f"[GURO SIDE DEBUG] Natanggap na ACTIVITY mula sa socket -> {activity_content} (IP: {addr[0]})")
+                if hasattr(self, 'after'):
+                    self.after(0, lambda a=activity_content, ip=addr[0]: handle_student_activity(self, a, ip))
             
             conn.close()
         except Exception as e:
             print(f"[ERROR sa Log Listener]: {e}")
 
+def handle_student_activity(self, activity_text, sender_ip):
+    """Pinoproseso at idinaragdag ang natanggap na activity sa Teacher's Inbox at pinipilit mag-refresh ang UI"""
+    print(f"[STUDENT ACTIVITY ALERT] mula {sender_ip}: {activity_text}")
+    
+    if not hasattr(self, 'inbox_logs_data') or self.inbox_logs_data is None:
+        self.inbox_logs_data = []
+        
+    new_log = {
+        "time": datetime.now().strftime('%H:%M:%S'),
+        "message": f"{activity_text}"
+    }
+    self.inbox_logs_data.append(new_log)
+    print(f"[GURO SIDE DEBUG] Kabuuang naka-save sa inbox_logs_data: {len(self.inbox_logs_data)}")
+
+    if hasattr(self, 'refresh_inbox_ui'):
+        try:
+            self.after(0, self.refresh_inbox_ui)
+        except Exception as e:
+            print(f"[ERROR sa pag-refresh ng Inbox UI]: {e}")
+
 def handle_student_expression(self, expression_text, sender_ip):
     """Nag-a-update ng expression sa card UI gamit ang IP address o PC match format"""
-    print(f"[STUDENT EXPRESSION ALERT] mula {sender_ip}: {expression_text}")
     try:
         parts = expression_text.split("|")
-        if len(parts) >= 2:
-            expression = parts[1].strip()
-        else:
-            expression = expression_text.strip()
+        expression = parts[1].strip() if len(parts) >= 2 else expression_text.strip()
             
         target_card_info = None
-        matched_key = None
-        
-        # 1. Subukang direktang hanapin gamit ang buong sender_ip bilang key
         if sender_ip in self.student_cards:
-            matched_key = sender_ip
             target_card_info = self.student_cards[sender_ip]
         else:
-            # 2. Hanapin sa bawat card kung nagtataglay ng IP o tugma ang PC suffix nito
             for key, card_info in self.student_cards.items():
                 if sender_ip in key or (isinstance(card_info, dict) and sender_ip in str(card_info)):
-                    matched_key = key
                     target_card_info = card_info
                     break
                 
-                # Hanapin ang tugma base sa dulo ng IP (hal. PC 40 mula sa 192.168.100.40)
                 pc_suffix = f"PC {sender_ip.split('.')[-1]}"
                 if isinstance(card_info, dict) and pc_suffix in card_info.get("name", ""):
-                    matched_key = key
                     target_card_info = card_info
                     break
 
         if target_card_info:
             target_card_info["expression"] = expression
-            
             current_name = target_card_info["name"]
             
-            # Alisin ang dating nakalagay na expression para hindi magpatong-patong
             if " | [" in current_name:
                 base_name = current_name.split(" | [")[0].strip()
             else:
                 base_name = current_name.strip()
                 
-            # I-update ang pangalan na may kasamang expression format
             target_card_info["name"] = f"{base_name} | [{expression}]"
             
             if "info_label" in target_card_info and target_card_info["info_label"].winfo_exists():
@@ -132,7 +145,6 @@ def handle_student_expression(self, expression_text, sender_ip):
                 print(f"[SUCCESS] Na-update ang card para sa IP {sender_ip} na may expression: {expression}")
         else:
             print(f"[WARNING] Walang nahanap na student card para sa IP: {sender_ip}")
-            
     except Exception as e:
         print(f"[ERROR parsing expression]: {e}")
 
@@ -156,12 +168,12 @@ def update_student_card_name(self, username, ip):
             card_info["preview"].configure(text=f"{display_name}\n(Waiting for Live Stream...)")
 
 def start_global_listener(self):
+    # Simulan ang Log / Expression / Activity Listener sa Port 5001
     threading.Thread(target=start_log_listener, args=(self,), daemon=True).start()
 
     def handle_client(conn, addr):
         student_ip = addr[0]
         self.connected_students[student_ip] = conn
-        
         display_name = f"User - {student_ip}"
         
         try:
@@ -175,7 +187,7 @@ def start_global_listener(self):
                     actual_username = parts[1].split("\n")[0].strip()
                     if actual_username:
                         display_name = f"{actual_username} - PC {student_ip.split('.')[-1]}"
-        except Exception as e:
+        except:
             conn.settimeout(None)
 
         clean_username = display_name.split(" - ")[0]
@@ -228,51 +240,15 @@ def start_global_listener(self):
     def stream_listener():
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(("0.0.0.0", 9998))
+        server.bind((TEACHER_IP, STREAM_PORT))
         server.listen(10)
+        print(f"[DEBUG] Stream listener ay BUKAS at ACTIVE sa {TEACHER_IP}:{STREAM_PORT}")
         while True:
             conn, addr = server.accept()
             threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
            
+    # Simulan ang Live Stream Listener sa Port 9998
     threading.Thread(target=stream_listener, daemon=True).start()
-
-    def handle_remote_client(conn, addr):
-        student_ip = addr[0]
-        try:
-            while True:
-                raw_length = conn.recv(4)
-                if not raw_length: break
-                frame_length = int.from_bytes(raw_length, byteorder='big')
-                
-                frame_data = b""
-                while len(frame_data) < frame_length:
-                    packet = conn.recv(frame_length - len(frame_data))
-                    if not packet: break
-                    frame_data += packet
-                    
-                if len(frame_data) == frame_length:
-                    image = Image.open(io.BytesIO(frame_data))
-                    img_tk = ImageTk.PhotoImage(image)
-                    
-                    if hasattr(self, 'active_viewers') and student_ip in self.active_viewers:
-                        viewer = self.active_viewers[student_ip]
-                        if viewer.winfo_exists():
-                            viewer.after(0, lambda img=img_tk, v=viewer: v.update_image(img))
-        except Exception as e:
-            print(f"Remote view error for {student_ip}: {e}")
-        finally:
-            conn.close()
-
-    def remote_listener():
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(("0.0.0.0", 9997))
-        server.listen(10)
-        while True:
-            conn, addr = server.accept()
-            threading.Thread(target=handle_remote_client, args=(conn, addr), daemon=True).start()
-
-    threading.Thread(target=remote_listener, daemon=True).start()
 
 def update_thumbnail_frame(self, ip, img_tk):
     if ip in self.student_cards:
